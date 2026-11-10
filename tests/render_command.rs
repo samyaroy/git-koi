@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use chrono::Days;
-use git_koi::behavior::{Behavior, select_behavior};
+use git_koi::behavior::{Behavior, Route, select_behavior, select_route};
 use git_koi::coat::KoiBody;
 use git_koi::history::{AccountSnapshot, ContributionDay};
 use git_koi::koi::{KoiDevelopment, derive_koi_development};
@@ -52,9 +52,18 @@ fn render_writes_the_days_loop_still_and_preview_as_the_renderer_draws_them() {
     let koi_development = derive_koi_development(&account_snapshot).unwrap();
     let behavior = select_behavior(&koi_development);
     assert_eq!(behavior, Behavior::Rest);
+    // The fourteenth quiet day is a Tuesday, so the loop can't pass as Monday's laps.
+    let route = select_route(&koi_development);
+    assert_eq!(route, Route::DLoop);
     let swim_frames: Vec<KoiFrame> = (0..frame_count(behavior))
         .map(|frame_index| {
-            render_swim_frame(&koi_development, KoiBody::White, behavior, frame_index)
+            render_swim_frame(
+                &koi_development,
+                KoiBody::White,
+                behavior,
+                route,
+                frame_index,
+            )
         })
         .collect();
     assert_eq!(

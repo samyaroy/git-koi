@@ -1,6 +1,6 @@
 use std::f64::consts::TAU;
 
-use git_koi::behavior::Behavior;
+use git_koi::behavior::{Behavior, Route};
 use git_koi::motion::{Course, SwimPose, calculate_swim_pose, frame_count};
 
 /// A pose value's name, how to read it, and whether it wraps around a full turn and
@@ -101,7 +101,7 @@ const STEP_LIMITS: [(Behavior, [f64; 17]); 5] = [
     (
         Behavior::Rest,
         [
-            0.0,
+            0.051,
             TAU / 15.0 + 1e-9,
             0.1,
             0.15,
@@ -112,9 +112,9 @@ const STEP_LIMITS: [(Behavior, [f64; 17]); 5] = [
             0.12,
             0.01,
             0.07,
-            0.01,
-            0.25,
-            0.3,
+            0.0,
+            0.0,
+            0.0,
             0.0,
             0.0,
             0.22,
@@ -123,7 +123,7 @@ const STEP_LIMITS: [(Behavior, [f64; 17]); 5] = [
     (
         Behavior::DeepRest,
         [
-            0.0,
+            0.027,
             TAU / 30.0 + 1e-9,
             0.02,
             0.05,
@@ -134,9 +134,9 @@ const STEP_LIMITS: [(Behavior, [f64; 17]); 5] = [
             0.3,
             1e-9,
             0.04,
-            0.005,
-            0.1,
-            0.12,
+            0.0,
+            0.0,
+            0.0,
             0.0,
             0.0,
             0.2,
@@ -145,7 +145,7 @@ const STEP_LIMITS: [(Behavior, [f64; 17]); 5] = [
     (
         Behavior::SurfaceFeeding,
         [
-            0.0,
+            0.051,
             TAU / 15.0 + 1e-9,
             0.1,
             0.15,
@@ -156,9 +156,9 @@ const STEP_LIMITS: [(Behavior, [f64; 17]); 5] = [
             0.12,
             0.01,
             0.07,
-            0.01,
-            0.25,
-            0.3,
+            0.0,
+            0.0,
+            0.0,
             0.0,
             TAU * 3.0 / 90.0 + 1e-9,
             0.22,
@@ -170,6 +170,30 @@ const STEP_LIMITS: [(Behavior, [f64; 17]); 5] = [
 fn every_pose_value_flows_across_the_loop_boundary() {
     for (behavior, step_limits) in STEP_LIMITS {
         assert_pose_values_flow(behavior, step_limits);
+    }
+}
+
+#[test]
+fn the_route_changes_only_where_the_koi_swims() {
+    for (behavior, _) in STEP_LIMITS {
+        for frame_index in 0..frame_count(behavior) {
+            let lap_pose = calculate_swim_pose(behavior, Route::Laps, frame_index);
+            let d_loop_pose = calculate_swim_pose(behavior, Route::DLoop, frame_index);
+            assert_eq!(
+                d_loop_pose.course,
+                Course::Lap {
+                    route: Route::DLoop,
+                    angle_radians: read_lap_angle(&lap_pose),
+                }
+            );
+            assert_eq!(
+                SwimPose {
+                    course: lap_pose.course,
+                    ..d_loop_pose
+                },
+                lap_pose
+            );
+        }
     }
 }
 
@@ -242,17 +266,10 @@ fn the_inside_fin_flares_and_both_brake_on_the_glide() {
 #[test]
 fn darting_swims_two_laps_of_bursts_with_tucked_then_spread_fins() {
     let poses = collect_loop(Behavior::Dart);
-    let lap_turn_radians: f64 = poses
-        .iter()
-        .zip(poses.iter().cycle().skip(1))
-        .map(|(pose, next_pose)| {
-            (read_lap_angle(next_pose) - read_lap_angle(pose) + TAU / 2.0).rem_euclid(TAU)
-                - TAU / 2.0
-        })
-        .sum();
-    assert!((lap_turn_radians - 2.0 * TAU).abs() < 1e-9);
+    assert!((measure_lap_turn(&poses) - 2.0 * TAU).abs() < 1e-9);
     for (frame_index, pose) in poses.iter().enumerate() {
-        let burst_later = calculate_swim_pose(Behavior::Dart, frame_index as u32 + 30);
+        let burst_frame = frame_index as u32 + 30;
+        let burst_later = calculate_swim_pose(Behavior::Dart, Route::Laps, burst_frame);
         assert!((burst_later.wave_strength - pose.wave_strength).abs() < 1e-12);
     }
     let strongest_wave = poses
@@ -267,32 +284,33 @@ fn darting_swims_two_laps_of_bursts_with_tucked_then_spread_fins() {
 }
 
 #[test]
-fn resting_hovers_a_little_deeper_and_deep_rest_lower_still() {
-    for (behavior, expected_frame_count, expected_depth) in
-        [(Behavior::Rest, 90, 0.22), (Behavior::DeepRest, 120, 0.5)]
-    {
+fn quiet_days_swim_one_slow_lap_deeper_and_deep_rest_lower_still() {
+    // One lap takes eight seconds cruising, twelve resting or feeding, and sixteen in
+    // deep rest.
+    for (behavior, expected_frame_count, expected_depth) in [
+        (Behavior::Cruise, 120, 0.0),
+        (Behavior::Rest, 180, 0.22),
+        (Behavior::SurfaceFeeding, 180, 0.0),
+        (Behavior::DeepRest, 240, 0.5),
+    ] {
         assert_eq!(frame_count(behavior), expected_frame_count);
-        for pose in collect_loop(behavior) {
-            assert!(matches!(pose.course, Course::Hover { .. }));
+        let poses = collect_loop(behavior);
+        let lap_turn = measure_lap_turn(&poses);
+        assert!((lap_turn - TAU).abs() < 1e-9, "{behavior:?}");
+        for pose in poses {
+            assert!(matches!(pose.course, Course::Lap { .. }));
             assert_eq!(pose.depth, expected_depth);
         }
     }
-    let average_drift_down = |behavior| {
-        let poses = collect_loop(behavior);
-        poses.iter().map(|pose| read_hover(pose).1[1]).sum::<f64>() / poses.len() as f64
-    };
-    assert!(average_drift_down(Behavior::DeepRest) > average_drift_down(Behavior::Rest) + 3.0);
-    for behavior in [Behavior::Cruise, Behavior::Dart] {
-        assert!(
-            collect_loop(behavior)
-                .iter()
-                .all(|pose| matches!(pose.course, Course::Lap { .. }) && pose.depth == 0.0)
-        );
-    }
+    assert!(
+        collect_loop(Behavior::Dart)
+            .iter()
+            .all(|pose| pose.depth == 0.0)
+    );
 }
 
 #[test]
-fn deep_rest_flicks_one_fin_once_per_loop() {
+fn deep_rest_flicks_one_fin_every_eight_seconds() {
     let flicking_frames: Vec<usize> = collect_loop(Behavior::DeepRest)
         .iter()
         .enumerate()
@@ -301,16 +319,24 @@ fn deep_rest_flicks_one_fin_once_per_loop() {
         })
         .map(|(frame_index, _)| frame_index)
         .collect();
-    assert!(!flicking_frames.is_empty() && flicking_frames.len() < 10);
+    let (first_flick, second_flick) = flicking_frames.split_at(flicking_frames.len() / 2);
+    assert!(!first_flick.is_empty() && first_flick.len() < 10);
     assert!(
-        flicking_frames
+        first_flick
             .windows(2)
             .all(|frame_pair| frame_pair[1] == frame_pair[0] + 1)
+    );
+    assert_eq!(first_flick.len(), second_flick.len());
+    assert!(
+        first_flick
+            .iter()
+            .zip(second_flick)
+            .all(|(&first_frame, &second_frame)| second_frame == first_frame + 120)
     );
 }
 
 #[test]
-fn surface_feeding_rests_at_the_surface_with_ripples_on_its_own_beat() {
+fn surface_feeding_swims_like_rest_at_the_surface_with_ripples_on_its_own_beat() {
     assert_eq!(
         frame_count(Behavior::SurfaceFeeding),
         frame_count(Behavior::Rest)
@@ -336,7 +362,7 @@ fn surface_feeding_rests_at_the_surface_with_ripples_on_its_own_beat() {
         .zip(feeding_phases.iter().cycle().skip(1))
         .filter(|(phase, next_phase)| next_phase < phase)
         .count();
-    assert_eq!(cycle_starts, 3);
+    assert_eq!(cycle_starts, 6);
     for behavior in [
         Behavior::Cruise,
         Behavior::Dart,
@@ -373,26 +399,31 @@ fn the_mouth_breathes_while_lapping_and_gulps_while_resting() {
     }
     for behavior in [Behavior::Rest, Behavior::SurfaceFeeding] {
         let (gulp_count, widest) = measure(behavior);
-        assert_eq!(gulp_count, 3, "{behavior:?}");
+        assert_eq!(gulp_count, 6, "{behavior:?}");
         assert!(widest > 0.99, "{behavior:?}");
     }
+    // One slow gulp with each of deep rest's two flicks.
     let deep_rest_poses = collect_loop(Behavior::DeepRest);
     let open_frames: Vec<usize> = (0..deep_rest_poses.len())
         .filter(|&frame_index| deep_rest_poses[frame_index].mouth_opening > 0.0)
         .collect();
-    assert_eq!(measure(Behavior::DeepRest).0, 1);
+    assert_eq!(measure(Behavior::DeepRest).0, 2);
     assert!(
         open_frames
             .iter()
-            .all(|frame_index| (66..=82).contains(frame_index))
+            .all(|frame_index| (66..=82).contains(&(frame_index % 120)))
     );
-    assert!(open_frames.contains(&70) && open_frames.contains(&78));
+    assert!(
+        [70, 78, 190, 198]
+            .iter()
+            .all(|frame_index| open_frames.contains(frame_index))
+    );
 }
 
 fn assert_pose_values_flow(behavior: Behavior, step_limits: [f64; 17]) {
     let loop_frame_count = frame_count(behavior) as usize;
     let mut poses = collect_loop(behavior);
-    poses.push(calculate_swim_pose(behavior, loop_frame_count as u32));
+    poses.push(calculate_swim_pose(behavior, Route::Laps, loop_frame_count as u32));
     assert_eq!(poses[loop_frame_count], poses[0]);
     for ((value_name, read_value, wraps_around), largest_step) in
         POSE_VALUES.into_iter().zip(step_limits)
@@ -425,17 +456,30 @@ fn assert_pose_values_flow(behavior: Behavior, step_limits: [f64; 17]) {
     }
 }
 
+/// A behavior's whole loop on laps; the D-loop's poses differ only in their route.
 fn collect_loop(behavior: Behavior) -> Vec<SwimPose> {
     (0..frame_count(behavior))
-        .map(|frame_index| calculate_swim_pose(behavior, frame_index))
+        .map(|frame_index| calculate_swim_pose(behavior, Route::Laps, frame_index))
         .collect()
 }
 
 fn read_lap_angle(pose: &SwimPose) -> f64 {
     match pose.course {
-        Course::Lap { angle_radians } => angle_radians,
+        Course::Lap { angle_radians, .. } => angle_radians,
         Course::Hover { .. } => 0.0,
     }
+}
+
+/// How far the head turns along the route over a whole loop of poses.
+fn measure_lap_turn(poses: &[SwimPose]) -> f64 {
+    poses
+        .iter()
+        .zip(poses.iter().cycle().skip(1))
+        .map(|(pose, next_pose)| {
+            (read_lap_angle(next_pose) - read_lap_angle(pose) + TAU / 2.0).rem_euclid(TAU)
+                - TAU / 2.0
+        })
+        .sum()
 }
 
 /// The heading offset and drift of a hovering pose; laps neither turn nor drift.
@@ -450,7 +494,7 @@ fn read_hover(pose: &SwimPose) -> (f64, [f64; 2]) {
 }
 
 fn cruise_pose(frame_index: u32) -> SwimPose {
-    calculate_swim_pose(Behavior::Cruise, frame_index)
+    calculate_swim_pose(Behavior::Cruise, Route::Laps, frame_index)
 }
 
 /// The opening both side fins share, without the inside flare and scull.

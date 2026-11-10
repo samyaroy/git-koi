@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
 
-use git_koi::behavior::Behavior;
+use git_koi::behavior::{Behavior, Route};
 use git_koi::coat::KoiBody;
 use git_koi::history::AccountSnapshot;
 use git_koi::koi::derive_koi_development;
@@ -94,6 +94,7 @@ fn encoded_feeding_excerpt() -> &'static (Vec<KoiFrame>, Vec<u8>) {
                     &koi_development,
                     KoiBody::default(),
                     Behavior::SurfaceFeeding,
+                    Route::DLoop,
                     frame_index,
                 )
             })

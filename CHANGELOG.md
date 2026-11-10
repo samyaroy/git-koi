@@ -6,6 +6,17 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The koi swims laps of a circle on Mondays and a D-loop on every other day:
+  over the top of a dome, a turn down, straight back across the middle, and a
+  turn up into the dome again. `select_route` chooses the route from the
+  observation date, `calculate_swim_pose` and `render_swim_frame` take it, and
+  the `git-koi render` caption names it.
+- Rest and surface feeding swim one slow lap in twelve seconds, and deep rest
+  glides one in sixteen, instead of hovering in place. Their depth, water-blue
+  tint, fins, gulps, feeding, and fin flicks keep their old rhythm.
+
 ## [1.0.2] - 2026-10-31
 
 ### Fixed

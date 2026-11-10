@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::Cursor;
 
 use chrono::{Datelike, Days, NaiveDate};
-use git_koi::behavior::Behavior;
+use git_koi::behavior::{Behavior, Route};
 use git_koi::coat::KoiBody;
 use git_koi::history::{AccountSnapshot, ContributionDay, ContributionWeek, LanguageColor};
 use git_koi::koi::{
@@ -26,6 +26,7 @@ const BODIES: [KoiBody; 6] = [
     KoiBody::Gold,
     KoiBody::Platinum,
 ];
+const ROUTES: [Route; 2] = [Route::Laps, Route::DLoop];
 const FOUR_LANGUAGE_MIX: LanguageMix = &[
     ("C", Some("#555555"), 0.25),
     ("Python", Some("#3572a5"), 0.25),
@@ -355,6 +356,12 @@ fn growth_slows_and_keeps_the_whole_fish_inside_a_transparent_frame() {
 
 #[test]
 fn swimming_keeps_the_whole_fish_inside_the_frame() {
+    for route in ROUTES {
+        assert_swimming_stays_inside_the_frame(route);
+    }
+}
+
+fn assert_swimming_stays_inside_the_frame(route: Route) {
     let mut koi_development = develop_with_languages(0, FOUR_LANGUAGE_MIX);
     for behavior in [
         Behavior::Cruise,
@@ -370,6 +377,7 @@ fn swimming_keeps_the_whole_fish_inside_the_frame() {
                     &koi_development,
                     KoiBody::default(),
                     behavior,
+                    route,
                     frame_index,
                 ));
                 assert!(
@@ -377,8 +385,8 @@ fn swimming_keeps_the_whole_fish_inside_the_frame() {
                         && opaque_bounds.top_y > 0
                         && opaque_bounds.right_x < FRAME_WIDTH_PIXELS - 1
                         && opaque_bounds.bottom_y < FRAME_HEIGHT_PIXELS - 1,
-                    "{behavior:?} at {contribution_total} contributions leaves the frame at \
-                     frame {frame_index}"
+                    "{behavior:?} {route:?} at {contribution_total} contributions leaves the \
+                     frame at frame {frame_index}"
                 );
             }
         }
@@ -397,6 +405,7 @@ fn surface_feeding_draws_pellets_that_rest_does_not() {
                     &koi_development,
                     KoiBody::default(),
                     behavior,
+                    Route::DLoop,
                     frame_index,
                 ))
             })
@@ -410,7 +419,13 @@ fn surface_feeding_draws_pellets_that_rest_does_not() {
 fn deeper_rest_turns_the_koi_toward_water_blue() {
     let koi_development = develop_with_languages(ADULT_CONTRIBUTIONS, FOUR_LANGUAGE_MIX);
     let measure_blue_lean = |behavior| {
-        let swim_frame = render_swim_frame(&koi_development, KoiBody::default(), behavior, 0);
+        let swim_frame = render_swim_frame(
+            &koi_development,
+            KoiBody::default(),
+            behavior,
+            Route::Laps,
+            0,
+        );
         let opaque_pixels: Vec<_> = swim_frame
             .as_rgba_bytes()
             .as_chunks::<4>()
@@ -440,6 +455,12 @@ fn deeper_rest_turns_the_koi_toward_water_blue() {
 
 #[test]
 fn the_swim_loop_is_seamless_and_never_jumps() {
+    for route in ROUTES {
+        assert_swim_loop_is_seamless(route);
+    }
+}
+
+fn assert_swim_loop_is_seamless(route: Route) {
     let koi_development = develop_with_languages(1_500, FOUR_LANGUAGE_MIX);
     let cruise_frame_count = frame_count(Behavior::Cruise);
     let swim_frames: Vec<_> = (0..=cruise_frame_count)
@@ -448,6 +469,7 @@ fn the_swim_loop_is_seamless_and_never_jumps() {
                 &koi_development,
                 KoiBody::default(),
                 Behavior::Cruise,
+                route,
                 frame_index,
             )
         })
@@ -465,7 +487,7 @@ fn the_swim_loop_is_seamless_and_never_jumps() {
         centroid_steps
             .iter()
             .all(|&centroid_step| centroid_step > 0.0 && centroid_step < 8.0),
-        "{centroid_steps:?}"
+        "{route:?} {centroid_steps:?}"
     );
     let boundary_step = centroid_steps[cruise_frame_count as usize - 1];
     let nearby_steps =
@@ -479,6 +501,48 @@ fn the_swim_loop_is_seamless_and_never_jumps() {
     for count_pair in opaque_counts.windows(2) {
         assert!((count_pair[1] - count_pair[0]).abs() < 0.1 * count_pair[0]);
     }
+}
+
+#[test]
+fn the_d_loop_sweeps_a_centered_dome_where_laps_sweep_a_circle() {
+    let koi_development = develop_with_languages(ADULT_CONTRIBUTIONS, FOUR_LANGUAGE_MIX);
+    // The width and height of everything the koi covers in a loop, and how far that
+    // sweep's center sits below the frame's.
+    let measure_sweep = |route| {
+        let mut sweep = OpaqueBounds {
+            left_x: FRAME_WIDTH_PIXELS,
+            top_y: FRAME_HEIGHT_PIXELS,
+            right_x: 0,
+            bottom_y: 0,
+        };
+        for frame_index in 0..frame_count(Behavior::Cruise) {
+            let frame_bounds = measure_opaque_bounds(&render_swim_frame(
+                &koi_development,
+                KoiBody::default(),
+                Behavior::Cruise,
+                route,
+                frame_index,
+            ));
+            sweep.left_x = sweep.left_x.min(frame_bounds.left_x);
+            sweep.top_y = sweep.top_y.min(frame_bounds.top_y);
+            sweep.right_x = sweep.right_x.max(frame_bounds.right_x);
+            sweep.bottom_y = sweep.bottom_y.max(frame_bounds.bottom_y);
+        }
+        let sweep_center_y = f64::from(sweep.top_y + sweep.bottom_y) / 2.0;
+        [
+            f64::from(sweep.right_x - sweep.left_x),
+            f64::from(sweep.bottom_y - sweep.top_y),
+            sweep_center_y - f64::from(FRAME_HEIGHT_PIXELS - 1) / 2.0,
+        ]
+    };
+    let [lap_width, lap_height, _] = measure_sweep(Route::Laps);
+    assert!(lap_height > 0.95 * lap_width, "{lap_width}, {lap_height}");
+    let [d_loop_width, d_loop_height, d_loop_drop] = measure_sweep(Route::DLoop);
+    assert!(
+        d_loop_height < 0.85 * d_loop_width,
+        "{d_loop_width}, {d_loop_height}"
+    );
+    assert!(d_loop_drop.abs() <= 6.0, "{d_loop_drop}");
 }
 
 #[test]

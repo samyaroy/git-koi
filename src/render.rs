@@ -19,7 +19,7 @@
 
 use std::f64::consts::{PI, TAU};
 
-use crate::behavior::Behavior;
+use crate::behavior::{Behavior, Route};
 use crate::coat::{KoiBody, KoiCoat, WHITE_RAMP};
 use crate::koi::{
     ADULT_CONTRIBUTIONS, KoiDevelopment, YOUNG_SHAPE_CONTRIBUTIONS, calculate_growth_fraction,
@@ -68,26 +68,29 @@ pub fn render_koi(koi_development: &KoiDevelopment, koi_body: KoiBody) -> KoiFra
     )
 }
 
-/// Render one frame of a behavior's seamless loop, colored like `render_koi`, in the
-/// pose `motion::calculate_swim_pose` gives; frame numbers wrap around the loop of
-/// `motion::frame_count(behavior)` frames. Laps circle the frame center, and longer
-/// koi swim a tighter lap so every size fits. A hovering loop is framed once, centered
-/// on the koi's sweep, and its drift shrinks only as far as the largest koi need to
-/// stay inside. The view never follows the fins, so it never shakes. Under water the koi
-/// turns toward water blue and partly drops out, more with depth. Identical inputs
-/// produce identical pixels without I/O, clock reads, or input mutation.
+/// Render one frame of a behavior's seamless loop along a route, colored like
+/// `render_koi`, in the pose `motion::calculate_swim_pose` gives; frame numbers wrap
+/// around the loop of `motion::frame_count(behavior)` frames. Laps circle the frame
+/// center, and longer koi swim a tighter lap so every size fits. The D-loop is
+/// centered on the frame and shrunk just enough to stay inside the same lap circle. A
+/// hovering loop is framed once, centered on the koi's sweep, and its drift shrinks
+/// only as far as the largest koi need to stay inside. The view never follows the
+/// fins, so it never shakes. Under water the koi turns toward water blue and partly
+/// drops out, more with depth. Identical inputs produce identical pixels without I/O,
+/// clock reads, or input mutation.
 pub fn render_swim_frame(
     koi_development: &KoiDevelopment,
     koi_body: KoiBody,
     behavior: Behavior,
+    route: Route,
     frame_index: u32,
 ) -> KoiFrame {
     let koi_anatomy = calculate_anatomy(koi_development.total_contributions);
-    let swim_pose = calculate_swim_pose(behavior, frame_index);
+    let swim_pose = calculate_swim_pose(behavior, route, frame_index);
     let pose_center = match swim_pose.course {
         Course::Lap { .. } => [0.0, 0.0],
         Course::Hover { drift_pixels, .. } => {
-            let hover_fit = fit_hover_loop(behavior, &koi_anatomy);
+            let hover_fit = fit_hover_loop(behavior, route, &koi_anatomy);
             [0, 1].map(|axis_index| {
                 hover_fit.sweep_center[axis_index]
                     - hover_fit.drift_scales[axis_index] * drift_pixels[axis_index]
@@ -119,12 +122,12 @@ struct HoverFit {
 
 /// Center a hovering loop on everything the koi covers across its frames, then shrink
 /// the drift on each axis only as far as needed to keep every frame inside the frame.
-fn fit_hover_loop(behavior: Behavior, koi_anatomy: &KoiAnatomy) -> HoverFit {
+fn fit_hover_loop(behavior: Behavior, route: Route, koi_anatomy: &KoiAnatomy) -> HoverFit {
     // Room for the outline, a clear pixel at the frame edge, and rounding.
     const FIT_MARGIN_PIXELS: f64 = 2.5;
     let frame_bounds: Vec<([[f64; 2]; 2], [f64; 2])> = (0..frame_count(behavior))
         .map(|frame_index| {
-            let swim_pose = calculate_swim_pose(behavior, frame_index);
+            let swim_pose = calculate_swim_pose(behavior, route, frame_index);
             let body_spine = build_spine(koi_anatomy, &swim_pose);
             let fin_curves = build_fins(&body_spine, koi_anatomy, &swim_pose);
             let [mut min_corner, mut max_corner] = measure_curve_bounds(&body_spine, &fin_curves);
@@ -726,7 +729,8 @@ fn smooth_step(fraction: f64) -> f64 {
 }
 
 /// The spine follows the pose's course: the still pose's fixed heading and gentle bend,
-/// turned by any heading offset, or a clockwise circle around the frame center.
+/// turned by any heading offset, a clockwise circle around the frame center, or the
+/// clockwise D-loop.
 fn build_spine(koi_anatomy: &KoiAnatomy, swim_pose: &SwimPose) -> Vec<CurvePoint> {
     const HEADING_RADIANS: f64 = -0.08;
     const BEND_RADIANS: f64 = 0.35;
@@ -765,7 +769,10 @@ fn build_spine(koi_anatomy: &KoiAnatomy, swim_pose: &SwimPose) -> Vec<CurvePoint
             center_points
         }
         // Each body point sits one pixel of arc behind the one in front.
-        Course::Lap { angle_radians } => {
+        Course::Lap {
+            route: Route::Laps,
+            angle_radians,
+        } => {
             let radius_pixels = calculate_lap_radius(body_length_pixels);
             (0..point_count)
                 .map(|point_index| {
@@ -775,6 +782,25 @@ fn build_spine(koi_anatomy: &KoiAnatomy, swim_pose: &SwimPose) -> Vec<CurvePoint
                             radius_pixels * point_angle_radians.cos(),
                             radius_pixels * point_angle_radians.sin(),
                         ],
+                        half_width_pixels: calculate_point_half_width(point_index),
+                    }
+                })
+                .collect()
+        }
+        // The same, one pixel of path behind; a full turn of the angle is one loop.
+        Course::Lap {
+            route: Route::DLoop,
+            angle_radians,
+        } => {
+            let dome_radius_pixels =
+                calculate_lap_radius(body_length_pixels) / calculate_d_loop_reach();
+            let head_distance = D_LOOP_LENGTH * (angle_radians + PI / 2.0) / TAU;
+            (0..point_count)
+                .map(|point_index| {
+                    let point_distance = head_distance - point_index as f64 / dome_radius_pixels;
+                    CurvePoint {
+                        position: locate_on_d_loop(point_distance)
+                            .map(|coordinate| dome_radius_pixels * coordinate),
                         half_width_pixels: calculate_point_half_width(point_index),
                     }
                 })
@@ -977,6 +1003,64 @@ fn calculate_lap_radius(body_length_pixels: f64) -> f64 {
     (FRAME_REACH_PIXELS - OUTER_REACH_FRACTION * body_length_pixels)
         .min(MAX_LAP_RADIUS_PIXELS)
         .max(body_length_pixels / (TAU * MAX_BODY_SHARE_OF_LAP))
+}
+
+/// The D-loop's turns, at each end of its straight, as a share of the dome's radius.
+/// The straight runs as far below the dome's center as a turn is wide, so each turn
+/// is a quarter circle.
+const D_LOOP_TURN_SHARE: f64 = 0.4;
+/// How far the D-loop sits below the dome's center, as a share of the dome's radius,
+/// so the dome's top and the straight are equally far from the frame center.
+const D_LOOP_DROP_SHARE: f64 = (1.0 - D_LOOP_TURN_SHARE) / 2.0;
+/// One loop of the D-loop, in dome radii: the dome, two quarter turns, and the
+/// straight.
+const D_LOOP_LENGTH: f64 = PI * (1.0 + D_LOOP_TURN_SHARE) + 2.0 * (1.0 - D_LOOP_TURN_SHARE);
+
+/// A point the given distance along the D-loop, clockwise from the top of the dome,
+/// with distances and the point in dome radii from the frame center. The path runs
+/// over the dome to its right end, turns down, runs straight back across, turns up,
+/// and runs over the dome to the top again.
+fn locate_on_d_loop(distance: f64) -> [f64; 2] {
+    const TURN_RADIUS: f64 = D_LOOP_TURN_SHARE;
+    const TURN_CENTER_X: f64 = 1.0 - D_LOOP_TURN_SHARE;
+    const QUARTER_DOME: f64 = PI / 2.0;
+    const QUARTER_TURN: f64 = D_LOOP_TURN_SHARE * PI / 2.0;
+    const STRAIGHT: f64 = 2.0 * TURN_CENTER_X;
+    let locate_on_circle = |center: [f64; 2], radius: f64, angle_radians: f64| {
+        [
+            center[0] + radius * angle_radians.cos(),
+            center[1] + radius * angle_radians.sin(),
+        ]
+    };
+    let mut remaining = distance.rem_euclid(D_LOOP_LENGTH);
+    if remaining < QUARTER_DOME {
+        return locate_on_circle([0.0, D_LOOP_DROP_SHARE], 1.0, -PI / 2.0 + remaining);
+    }
+    remaining -= QUARTER_DOME;
+    if remaining < QUARTER_TURN {
+        let turn_center = [TURN_CENTER_X, D_LOOP_DROP_SHARE];
+        return locate_on_circle(turn_center, TURN_RADIUS, remaining / TURN_RADIUS);
+    }
+    remaining -= QUARTER_TURN;
+    if remaining < STRAIGHT {
+        return [TURN_CENTER_X - remaining, D_LOOP_DROP_SHARE + TURN_RADIUS];
+    }
+    remaining -= STRAIGHT;
+    if remaining < QUARTER_TURN {
+        let turn_center = [-TURN_CENTER_X, D_LOOP_DROP_SHARE];
+        let turn_angle_radians = PI / 2.0 + remaining / TURN_RADIUS;
+        return locate_on_circle(turn_center, TURN_RADIUS, turn_angle_radians);
+    }
+    remaining -= QUARTER_TURN;
+    locate_on_circle([0.0, D_LOOP_DROP_SHARE], 1.0, PI + remaining)
+}
+
+/// How far the D-loop reaches from the frame center at most, in dome radii: at the
+/// outside of a turn, beyond the dome's ends.
+fn calculate_d_loop_reach() -> f64 {
+    let turn_reach = (1.0 - D_LOOP_TURN_SHARE).hypot(D_LOOP_DROP_SHARE) + D_LOOP_TURN_SHARE;
+    let dome_end_reach = 1.0_f64.hypot(D_LOOP_DROP_SHARE);
+    turn_reach.max(dome_end_reach)
 }
 
 /// The corners of the box that holds every curve, including its half widths.
@@ -1300,5 +1384,57 @@ mod tests {
         let half_open = count_painted(&paint_mouth_alone(KoiBody::White, 0.5));
         let wide_open = count_painted(&paint_mouth_alone(KoiBody::White, 1.0));
         assert!(0 < half_open && half_open < wide_open);
+    }
+
+    #[test]
+    fn the_d_loop_runs_smoothly_over_the_dome_and_straight_back_across_the_middle() {
+        const SAMPLE_COUNT: u32 = 2_000;
+        let step_length = D_LOOP_LENGTH / f64::from(SAMPLE_COUNT);
+        let points: Vec<[f64; 2]> = (0..=SAMPLE_COUNT)
+            .map(|sample_index| locate_on_d_loop(f64::from(sample_index) * step_length))
+            .collect();
+        let measure_step = |from: [f64; 2], to: [f64; 2]| [to[0] - from[0], to[1] - from[1]];
+        // Clockwise from the top of the dome, and back to it.
+        assert!(points[1][0] > points[0][0]);
+        let closing_step = measure_step(points[0], points[SAMPLE_COUNT as usize]);
+        assert!(closing_step[0].hypot(closing_step[1]) < 1e-9);
+        // Every step is as long as the others and turns a little clockwise or not at
+        // all, so the path never jumps or kinks.
+        let steps: Vec<[f64; 2]> = points
+            .windows(2)
+            .map(|point_pair| measure_step(point_pair[0], point_pair[1]))
+            .collect();
+        for step_pair in steps.windows(2) {
+            let [earlier, later] = [step_pair[0], step_pair[1]];
+            assert!((later[0].hypot(later[1]) - step_length).abs() < 0.01 * step_length);
+            let cross = earlier[0] * later[1] - earlier[1] * later[0];
+            let dot = earlier[0] * later[0] + earlier[1] * later[1];
+            let turn_radians = cross.atan2(dot);
+            assert!((0.0..0.01).contains(&turn_radians), "{turn_radians}");
+        }
+        // Centered on the frame, and reaching no farther than its reach.
+        let top = points
+            .iter()
+            .map(|point| point[1])
+            .fold(f64::INFINITY, f64::min);
+        let bottom = points
+            .iter()
+            .map(|point| point[1])
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!((top + bottom).abs() < 1e-9);
+        let farthest = points
+            .iter()
+            .map(|point| point[0].hypot(point[1]))
+            .fold(0.0, f64::max);
+        let reach = calculate_d_loop_reach();
+        assert!(farthest <= reach + 1e-12 && farthest > reach - 1e-3);
+        // The straight runs leftward along the bottom, longer than the dome's radius.
+        let straight_xs: Vec<f64> = points
+            .iter()
+            .filter(|point| point[1] == bottom)
+            .map(|point| point[0])
+            .collect();
+        assert!(straight_xs.windows(2).all(|x_pair| x_pair[1] < x_pair[0]));
+        assert!(straight_xs[0] - straight_xs[straight_xs.len() - 1] > 1.1);
     }
 }

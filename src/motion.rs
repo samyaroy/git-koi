@@ -2,7 +2,7 @@
 
 use std::f64::consts::{PI, TAU};
 
-use crate::behavior::Behavior;
+use crate::behavior::{Behavior, Route};
 
 /// Frames per second of every behavior's loop; GIF frame delays derive from it.
 pub const FRAMES_PER_SECOND: u32 = 15;
@@ -17,17 +17,21 @@ const PELVIC_SHARE_OF_SIDE_FIN_OPENING: f64 = 0.5;
 const WHISKER_SWAY_RADIANS: f64 = 0.15;
 const WHISKER_SWAY_LAG_RADIANS: f64 = 0.6;
 
-/// Rest and surface feeding share this loop.
-const REST_FRAME_COUNT: u32 = 90;
+/// Rest and surface feeding swim one slow lap in this loop, twice their rhythm, which
+/// sets the pace of their fins, gulps, and feeding.
+const REST_FRAME_COUNT: u32 = 180;
+const REST_RHYTHM_FRAME_COUNT: u32 = 90;
 const REST_DEPTH: f64 = 0.22;
-/// Feeding ripples and pellets repeat this many times per loop.
-const FEEDING_CYCLES_PER_LOOP: f64 = 3.0;
+/// Feeding ripples and pellets repeat this many times per rhythm.
+const FEEDING_CYCLES_PER_RHYTHM: f64 = 3.0;
 /// Cruising and darting breathe this many times per loop, opening this far.
 const BREATHS_PER_LOOP: f64 = 5.0;
 const BREATH_OPENING: f64 = 0.7;
-/// Resting and feeding gulp this many times per loop, opening fully.
-const GULPS_PER_LOOP: f64 = 3.0;
-const DEEP_REST_FRAME_COUNT: u32 = 120;
+/// Resting and feeding gulp this many times per rhythm, opening fully.
+const GULPS_PER_RHYTHM: f64 = 3.0;
+/// Deep rest glides one slower lap in this loop, twice the rhythm of its fin flick.
+const DEEP_REST_FRAME_COUNT: u32 = 240;
+const DEEP_REST_RHYTHM_FRAME_COUNT: u32 = 120;
 const DEEP_REST_DEPTH: f64 = 0.5;
 
 /// The numbers behind one kind of lap swimming. Each loop holds whole numbers of
@@ -122,10 +126,13 @@ const DART_STYLE: LapStyle = LapStyle {
 /// Where the koi swims in a frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Course {
-    /// Clockwise around the frame center. The head's angle is measured clockwise on
-    /// screen from the right; loops start with the head at the top.
+    /// Clockwise along the day's route; loops start with the head at the top. On laps
+    /// the head's angle is measured clockwise on screen from the right; on the D-loop
+    /// the angle measures distance along the path, a full turn to a loop.
     Lap {
-        /// Where the head is on the lap.
+        /// The path the koi swims.
+        route: Route,
+        /// Where the head is on the route.
         angle_radians: f64,
     },
     /// In place, in the still pose turned by the heading offset and moved by the drift.
@@ -199,21 +206,22 @@ pub fn frame_count(behavior: Behavior) -> u32 {
     }
 }
 
-/// The pose for a frame of a behavior's loop; frame numbers wrap around the loop, so
-/// frame `frame_count(behavior)` is frame zero again.
+/// The pose for a frame of a behavior's loop along a route; frame numbers wrap around
+/// the loop, so frame `frame_count(behavior)` is frame zero again.
 ///
-/// Cruising and darting swim clockwise laps driven by strokes, each a beat and a
-/// glide. The koi speeds up a little after each stroke and coasts through the glide;
-/// lap speeds are rescaled so the loop covers exactly its laps. Cruising side fins
-/// brake open on the glide; darting side fins tuck through each burst and spread
-/// through the glide. Resting hovers a little deeper with a slow beat and glide and
-/// sculling fins; surface feeding moves the same way at the surface, with ripples
-/// and pellets; deep rest hovers lower still, barely moving, with one fin flick per
-/// loop. In every behavior the tail lobes bend behind the wave, the side fins' tips
-/// trail their roots, the pelvic fins follow at half the opening, and the whiskers
-/// sway. The mouth breathes while the koi laps, gulps while it rests or feeds, and
-/// takes one slow gulp with deep rest's fin flick.
-pub fn calculate_swim_pose(behavior: Behavior, frame_index: u32) -> SwimPose {
+/// Every behavior swims clockwise laps of the route. Cruising and darting are driven
+/// by strokes, each a beat and a glide. The koi speeds up a little after each stroke
+/// and coasts through the glide; lap speeds are rescaled so the loop covers exactly
+/// its laps. Cruising side fins brake open on the glide; darting side fins tuck
+/// through each burst and spread through the glide. Resting swims one slow lap a
+/// little deeper with slow beats and glides and sculling fins; surface feeding swims
+/// the same way at the surface, with ripples and pellets; deep rest glides one slower
+/// lap lower still, barely moving, with a fin flick every eight seconds. In every
+/// behavior the tail lobes bend behind the wave, the side fins' tips trail their
+/// roots, the pelvic fins follow at half the opening, and the whiskers sway. The mouth
+/// breathes while the koi cruises or darts, gulps while it rests or feeds, and takes
+/// one slow gulp with each of deep rest's fin flicks.
+pub fn calculate_swim_pose(behavior: Behavior, route: Route, frame_index: u32) -> SwimPose {
     let loop_frame_count = frame_count(behavior);
     let loop_frame = frame_index % loop_frame_count;
     let drive = calculate_drive(behavior, loop_frame);
@@ -228,7 +236,10 @@ pub fn calculate_swim_pose(behavior: Behavior, frame_index: u32) -> SwimPose {
     let side_fin_openings = drive.calculate_side_fin_openings();
     let trailing_openings = trailing_drive.calculate_side_fin_openings();
     SwimPose {
-        course: drive.course,
+        course: Course::Lap {
+            route,
+            angle_radians: drive.lap_angle_radians,
+        },
         depth: drive.depth,
         wave_phase_radians: drive.wave_phase_radians,
         wave_strength: drive.wave_strength,
@@ -250,7 +261,8 @@ pub fn calculate_swim_pose(behavior: Behavior, frame_index: u32) -> SwimPose {
 /// What a behavior decides for one frame; the tail, fin trail, pelvic fins, and
 /// whiskers follow from it the same way for every behavior.
 struct Drive {
-    course: Course,
+    /// Where the head is on the route, as `Course::Lap` measures it.
+    lap_angle_radians: f64,
     depth: f64,
     wave_phase_radians: f64,
     wave_strength: f64,
@@ -278,24 +290,25 @@ fn calculate_drive(behavior: Behavior, loop_frame: u32) -> Drive {
         Behavior::Cruise => CRUISE_STYLE.calculate_drive(loop_frame),
         Behavior::Dart => DART_STYLE.calculate_drive(loop_frame),
         Behavior::Rest => calculate_rest_drive(loop_frame, REST_DEPTH),
-        Behavior::SurfaceFeeding => Drive {
-            feeding_phase: Some(
-                (FEEDING_CYCLES_PER_LOOP * f64::from(loop_frame) / f64::from(REST_FRAME_COUNT))
-                    .fract(),
-            ),
-            ..calculate_rest_drive(loop_frame, 0.0)
-        },
+        Behavior::SurfaceFeeding => {
+            let rhythm_fraction = f64::from(loop_frame) / f64::from(REST_RHYTHM_FRAME_COUNT);
+            Drive {
+                feeding_phase: Some((FEEDING_CYCLES_PER_RHYTHM * rhythm_fraction).fract()),
+                ..calculate_rest_drive(loop_frame, 0.0)
+            }
+        }
         Behavior::DeepRest => calculate_deep_rest_drive(loop_frame),
     }
 }
 
-/// Hovers in place at the given depth, swinging and drifting slowly, with two slow
-/// beats and glides and gently sculling side fins.
+/// Swims one slow lap at the given depth, with two slow beats and glides per rhythm
+/// and gently sculling side fins; the koi speeds up a little after each beat.
 fn calculate_rest_drive(loop_frame: u32, depth: f64) -> Drive {
     const STROKE_FRAME_COUNT: f64 = 45.0;
     const STROKE_SHARE: f64 = 0.4;
-    const SWING_RADIANS: f64 = 0.1;
-    const DRIFT_PIXELS: [f64; 2] = [3.0, 2.0];
+    const SPEED_LAG_FRAMES: f64 = 6.0;
+    const GLIDE_SPEED: f64 = 0.75;
+    const STROKE_SPEED_GAIN: f64 = 0.5;
     const WAVE_FRAME_COUNT: f64 = 15.0;
     const GLIDE_WAVE_STRENGTH: f64 = 0.15;
     const STROKE_WAVE_GAIN: f64 = 0.5;
@@ -305,34 +318,30 @@ fn calculate_rest_drive(loop_frame: u32, depth: f64) -> Drive {
     const SCULL_SWING_RADIANS: f64 = 0.12;
     const SCULL_FRAME_COUNT: f64 = 18.0;
     let frame = f64::from(loop_frame);
-    let loop_turn = TAU * frame / f64::from(REST_FRAME_COUNT);
+    let rhythm_turn = TAU * frame / f64::from(REST_RHYTHM_FRAME_COUNT);
     let stroke = calculate_beat(frame, STROKE_FRAME_COUNT, STROKE_SHARE);
+    let calculate_speed = |speed_frame: f64| {
+        let stroke_frame = speed_frame - SPEED_LAG_FRAMES;
+        GLIDE_SPEED
+            + STROKE_SPEED_GAIN * calculate_beat(stroke_frame, STROKE_FRAME_COUNT, STROKE_SHARE)
+    };
     Drive {
-        course: Course::Hover {
-            heading_offset_radians: SWING_RADIANS * loop_turn.sin(),
-            drift_pixels: [
-                -DRIFT_PIXELS[0] * loop_turn.sin(),
-                -DRIFT_PIXELS[1] * (2.0 * loop_turn + 1.0).sin(),
-            ],
-        },
+        lap_angle_radians: calculate_lap_angle(loop_frame, REST_FRAME_COUNT, 1.0, calculate_speed),
         depth,
         wave_phase_radians: STILL_POSE.wave_phase_radians + frame * TAU / WAVE_FRAME_COUNT,
         wave_strength: GLIDE_WAVE_STRENGTH + STROKE_WAVE_GAIN * stroke,
         tail_spread_radians: TAIL_SPREAD_RADIANS,
         stroke_opening_radians: SIDE_FIN_OPENING_RADIANS
-            + SIDE_FIN_BREATH_RADIANS * (3.0 * loop_turn).sin(),
+            + SIDE_FIN_BREATH_RADIANS * (3.0 * rhythm_turn).sin(),
         right_fin_offset_radians: SCULL_SWING_RADIANS * (TAU * frame / SCULL_FRAME_COUNT).sin(),
         feeding_phase: None,
-        mouth_opening: (GULPS_PER_LOOP * loop_turn).sin().max(0.0),
+        mouth_opening: (GULPS_PER_RHYTHM * rhythm_turn).sin().max(0.0),
     }
 }
 
-/// Hovers lower still and barely moves: a slow swing and drift, a breathing wave, and
-/// one flick per loop in which the right fin opens as the left tucks.
+/// Glides one slower lap lower still and barely moves: a steady pace, a breathing
+/// wave, and one flick per rhythm in which the right fin opens as the left tucks.
 fn calculate_deep_rest_drive(loop_frame: u32) -> Drive {
-    const SWING_RADIANS: f64 = 0.05;
-    const DRIFT_PIXELS: [f64; 2] = [1.5, 1.0];
-    const SINK_PIXELS: f64 = 4.0;
     const WAVE_FRAME_COUNT: f64 = 30.0;
     const WAVE_STRENGTH: f64 = 0.12;
     const WAVE_BREATH: f64 = 0.1;
@@ -345,36 +354,48 @@ fn calculate_deep_rest_drive(loop_frame: u32) -> Drive {
     const GULP_START_FRAME: f64 = 66.0;
     const GULP_FRAME_COUNT: f64 = 16.0;
     let frame = f64::from(loop_frame);
-    let loop_turn = TAU * frame / f64::from(DEEP_REST_FRAME_COUNT);
-    let flick_fraction = (frame - FLICK_START_FRAME) / FLICK_FRAME_COUNT;
+    let rhythm_frame = f64::from(loop_frame % DEEP_REST_RHYTHM_FRAME_COUNT);
+    let rhythm_turn = TAU * frame / f64::from(DEEP_REST_RHYTHM_FRAME_COUNT);
+    let flick_fraction = (rhythm_frame - FLICK_START_FRAME) / FLICK_FRAME_COUNT;
     let flick = if (0.0..=1.0).contains(&flick_fraction) {
         (PI * flick_fraction).sin()
     } else {
         0.0
     };
-    let gulp_fraction = (frame - GULP_START_FRAME) / GULP_FRAME_COUNT;
+    let gulp_fraction = (rhythm_frame - GULP_START_FRAME) / GULP_FRAME_COUNT;
     let mouth_opening = if (0.0..=1.0).contains(&gulp_fraction) {
         (PI * gulp_fraction).sin()
     } else {
         0.0
     };
     Drive {
-        course: Course::Hover {
-            heading_offset_radians: SWING_RADIANS * loop_turn.sin(),
-            drift_pixels: [
-                -DRIFT_PIXELS[0] * loop_turn.sin(),
-                SINK_PIXELS - DRIFT_PIXELS[1] * (2.0 * loop_turn).sin(),
-            ],
-        },
+        lap_angle_radians: -PI / 2.0 + TAU * frame / f64::from(DEEP_REST_FRAME_COUNT),
         depth: DEEP_REST_DEPTH,
         wave_phase_radians: STILL_POSE.wave_phase_radians + frame * TAU / WAVE_FRAME_COUNT,
-        wave_strength: WAVE_STRENGTH + WAVE_BREATH * (2.0 * loop_turn).sin(),
+        wave_strength: WAVE_STRENGTH + WAVE_BREATH * (2.0 * rhythm_turn).sin(),
         tail_spread_radians: TAIL_SPREAD_RADIANS,
         stroke_opening_radians: SIDE_FIN_OPENING_RADIANS,
         right_fin_offset_radians: FLICK_RADIANS * flick,
         feeding_phase: None,
         mouth_opening,
     }
+}
+
+/// Where the head is on the route at a frame of a loop of whole laps, starting at the
+/// top. The pace follows the speed the closure gives for each frame of the loop,
+/// rescaled so the loop covers exactly its laps.
+fn calculate_lap_angle(
+    loop_frame: u32,
+    loop_frame_count: u32,
+    lap_count: f64,
+    calculate_speed: impl Fn(f64) -> f64,
+) -> f64 {
+    let lap_speeds: Vec<f64> = (0..loop_frame_count)
+        .map(|speed_frame| calculate_speed(f64::from(speed_frame)))
+        .collect();
+    let total_speed: f64 = lap_speeds.iter().sum();
+    let covered_speed: f64 = lap_speeds[..loop_frame as usize].iter().sum();
+    -PI / 2.0 + TAU * lap_count * covered_speed / total_speed
 }
 
 /// Beat strength at a frame: a smooth beat over the first part of each cycle, then
@@ -399,15 +420,11 @@ impl LapStyle {
     }
 
     fn calculate_drive(&self, loop_frame: u32) -> Drive {
-        let lap_speeds: Vec<f64> = (0..self.loop_frame_count)
-            .map(|speed_frame| {
-                self.glide_speed
-                    + self.stroke_speed_gain
-                        * self.calculate_stroke(f64::from(speed_frame) - self.speed_lag_frames)
-            })
-            .collect();
-        let total_speed: f64 = lap_speeds.iter().sum();
-        let covered_speed: f64 = lap_speeds[..loop_frame as usize].iter().sum();
+        let calculate_speed = |speed_frame: f64| {
+            self.glide_speed
+                + self.stroke_speed_gain
+                    * self.calculate_stroke(speed_frame - self.speed_lag_frames)
+        };
         let frame = f64::from(loop_frame);
         let stroke = self.calculate_stroke(frame);
         let wave_phase_radians =
@@ -418,9 +435,12 @@ impl LapStyle {
             .sin()
             .max(0.0);
         Drive {
-            course: Course::Lap {
-                angle_radians: -PI / 2.0 + TAU * self.lap_count * covered_speed / total_speed,
-            },
+            lap_angle_radians: calculate_lap_angle(
+                loop_frame,
+                self.loop_frame_count,
+                self.lap_count,
+                calculate_speed,
+            ),
             depth: 0.0,
             wave_phase_radians,
             wave_strength: self.glide_wave_strength + self.stroke_wave_gain * stroke,

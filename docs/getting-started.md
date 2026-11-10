@@ -97,10 +97,11 @@ cargo add git-koi serde_json
 ```
 
 The pipeline runs one way. Read or collect an `AccountSnapshot`, derive the
-koi's development, choose the day's behavior, render frames, and encode them:
+koi's development, choose the day's behavior and route, render frames, and
+encode them:
 
 ```rust
-use git_koi::behavior::select_behavior;
+use git_koi::behavior::{select_behavior, select_route};
 use git_koi::coat::KoiBody;
 use git_koi::history::AccountSnapshot;
 use git_koi::koi::derive_koi_development;
@@ -114,8 +115,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let koi_development = derive_koi_development(&account_snapshot)?;
     let koi_body = KoiBody::Asagi;
     let behavior = select_behavior(&koi_development);
+    let route = select_route(&koi_development);
     let swim_frames: Vec<_> = (0..frame_count(behavior))
-        .map(|frame_index| render_swim_frame(&koi_development, koi_body, behavior, frame_index))
+        .map(|frame_index| {
+            render_swim_frame(&koi_development, koi_body, behavior, route, frame_index)
+        })
         .collect();
     std::fs::write("koi.gif", encode_gif(&swim_frames)?)?;
     std::fs::write("koi.png", encode_png(&render_koi(&koi_development, koi_body))?)?;

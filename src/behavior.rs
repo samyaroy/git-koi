@@ -1,20 +1,34 @@
-//! The day's movement, chosen from recent activity by one ordered set of rules.
+//! The day's movement, chosen from recent activity by one ordered set of rules, and
+//! the route it swims, chosen from the weekday.
+
+use chrono::{Datelike, Weekday};
 
 use crate::koi::{KoiDevelopment, RecentActivity};
 
 /// One movement per run.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Behavior {
-    /// Sits low in the water, blue-tinted, barely moving.
+    /// Glides one slower lap low in the water, blue-tinted, barely moving.
     DeepRest,
-    /// Hovers in place a little deeper, with a slow beat and glide.
+    /// Swims one slow lap a little deeper, with a slow beat and glide.
     Rest,
-    /// Hovers at the surface and gulps.
+    /// Swims one slow lap at the surface and gulps.
     SurfaceFeeding,
     /// Two fast laps of strong bursts and glides.
     Dart,
-    /// One slow lap; the everyday swim.
+    /// One lap; the everyday swim.
     Cruise,
+}
+
+/// The path every behavior swims, clockwise, starting with the head at the top. A
+/// behavior sets how fast and how deep the koi goes along it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Route {
+    /// Round and round a circle about the frame center.
+    Laps,
+    /// Over the top of a dome, a turn down at its right end, straight back across the
+    /// middle, and a turn up into the dome again.
+    DLoop,
 }
 
 const DEEP_REST_QUIET_DAYS: u32 = 60;
@@ -61,6 +75,17 @@ pub fn select_behavior(koi_development: &KoiDevelopment) -> Behavior {
         Behavior::Dart
     } else {
         Behavior::Cruise
+    }
+}
+
+/// Choose the route for the day after the observation date, as `select_behavior`
+/// chooses the movement: laps after a Sunday, so on Mondays, and the D-loop on every
+/// other day. This reads no clock.
+pub fn select_route(koi_development: &KoiDevelopment) -> Route {
+    if koi_development.observed_on.weekday() == Weekday::Sun {
+        Route::Laps
+    } else {
+        Route::DLoop
     }
 }
 

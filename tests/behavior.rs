@@ -1,5 +1,5 @@
-use chrono::{Days, NaiveDate};
-use git_koi::behavior::{Behavior, select_behavior};
+use chrono::{Datelike, Days, NaiveDate, Weekday};
+use git_koi::behavior::{Behavior, Route, select_behavior, select_route};
 use git_koi::history::{AccountSnapshot, ContributionDay, ContributionHistory};
 use git_koi::koi::{KoiDevelopment, derive_koi_development};
 
@@ -160,6 +160,28 @@ fn quiet_days_change_behavior_only_at_the_thresholds_and_nothing_else() {
 }
 
 /// Daily counts from a Monday, observed on the last day.
+#[test]
+fn the_koi_laps_on_mondays_and_swims_the_d_loop_on_other_days() {
+    // The koi shows the day after its observation date, so a Sunday observation laps.
+    for extra_day_count in 0..7 {
+        let daily_counts = vec![1; 20 * 7 + extra_day_count];
+        let koi_development = develop_from_daily_counts(&daily_counts);
+        let observed_sunday = koi_development.observed_on.weekday() == Weekday::Sun;
+        assert_eq!(observed_sunday, extra_day_count == 0);
+        let expected_route = if observed_sunday {
+            Route::Laps
+        } else {
+            Route::DLoop
+        };
+        assert_eq!(
+            select_route(&koi_development),
+            expected_route,
+            "{}",
+            koi_development.observed_on
+        );
+    }
+}
+
 fn develop_from_daily_counts(daily_counts: &[u32]) -> KoiDevelopment {
     let first_monday: NaiveDate = "2025-01-06".parse().unwrap();
     let mut account_snapshot: AccountSnapshot =

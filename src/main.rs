@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, fs};
 
 use chrono::{DateTime, NaiveDate};
-use git_koi::behavior::{Behavior, select_behavior};
+use git_koi::behavior::{Behavior, Route, select_behavior, select_route};
 use git_koi::coat::KoiBody;
 use git_koi::collect::{GhCli, collect_account_snapshot};
 use git_koi::history::AccountSnapshot;
@@ -131,7 +131,8 @@ fn run_render(snapshot_path: &Path, output_directory: &Path, koi_body: KoiBody) 
     }
 }
 
-/// The day's files, by name, with a caption naming the behavior, observation date, and body.
+/// The day's files, by name, with a caption naming the behavior, route, observation date,
+/// and body.
 struct RenderedDay {
     caption: String,
     output_files: [(&'static str, Vec<u8>); 3],
@@ -146,16 +147,20 @@ fn render_day(snapshot_path: &Path, koi_body: KoiBody) -> Result<RenderedDay, St
     let koi_development = derive_koi_development(&account_snapshot)
         .map_err(|development_error| development_error.to_string())?;
     let behavior = select_behavior(&koi_development);
+    let route = select_route(&koi_development);
     let swim_frames: Vec<KoiFrame> = (0..frame_count(behavior))
-        .map(|frame_index| render_swim_frame(&koi_development, koi_body, behavior, frame_index))
+        .map(|frame_index| {
+            render_swim_frame(&koi_development, koi_body, behavior, route, frame_index)
+        })
         .collect();
     let gif_bytes =
         encode_gif(&swim_frames).map_err(|encoding_error| encoding_error.to_string())?;
     let png_bytes = encode_png(&render_koi(&koi_development, koi_body))
         .map_err(|encoding_error| encoding_error.to_string())?;
     let caption = format!(
-        "{} for {}, {} body",
+        "{} {} for {}, {} body",
         describe_behavior(behavior),
+        describe_route(route),
         koi_development.observed_on,
         name_body(koi_body)
     );
@@ -192,6 +197,13 @@ fn describe_behavior(behavior: Behavior) -> &'static str {
         Behavior::SurfaceFeeding => "surface feeding",
         Behavior::Dart => "dart",
         Behavior::Cruise => "cruise",
+    }
+}
+
+fn describe_route(route: Route) -> &'static str {
+    match route {
+        Route::Laps => "in laps",
+        Route::DLoop => "in a D-loop",
     }
 }
 
