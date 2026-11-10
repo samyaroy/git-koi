@@ -1,10 +1,11 @@
 name: CI
 
-# The gates every change passes. The ruleset on main requires both jobs.
+# The gates every change passes. The ruleset on main requires both jobs. Pushes to
+# folio-forge-connector, which FolioForge's nightly koi builds from, run them too.
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, folio-forge-connector]
 
 permissions:
   contents: read
