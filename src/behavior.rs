@@ -17,6 +17,8 @@ pub enum Behavior {
     Cruise,
 }
 
+const DEEP_REST_QUIET_DAYS: u32 = 60;
+const REST_QUIET_DAYS: u32 = 14;
 /// Totals whose crossing earns a week of darting.
 const DART_MILESTONES: [u64; 6] = [1_000, 5_000, 10_000, 25_000, 50_000, 100_000];
 /// A busy week is compared with at most this many of the latest complete weeks.
@@ -33,13 +35,12 @@ const DAYS_PER_WEEK: usize = 7;
 ///
 /// | Behavior | When the observation date |
 /// | --- | --- |
+/// | Deep rest | ends DEEP_REST_QUIET_DAYS or more quiet days |
+/// | Rest | ends REST_QUIET_DAYS or more quiet days |
+/// | Surface feeding | is the first day with contributions in its Monday-Sunday week |
 /// | Dart | falls within seven days of the total crossing a milestone |
 /// | Dart | is a Sunday that finishes a busy week |
 /// | Cruise | is anything else |
-///
-/// This fork always swims laps: quiet stretches and the first contribution of a
-/// week no longer choose deep rest, rest, or surface feeding, though the renderer
-/// can still draw them.
 ///
 /// A finished week is busy when at most one in ten of the latest
 /// DART_COMPARED_WEEKS complete weeks before it match or beat its total, and at
@@ -48,13 +49,27 @@ const DAYS_PER_WEEK: usize = 7;
 /// and changes no growth, colors, or marks.
 pub fn select_behavior(koi_development: &KoiDevelopment) -> Behavior {
     let recent_activity = &koi_development.recent_activity;
-    if has_crossed_milestone(koi_development.total_contributions, recent_activity)
+    if recent_activity.quiet_day_count >= DEEP_REST_QUIET_DAYS {
+        Behavior::DeepRest
+    } else if recent_activity.quiet_day_count >= REST_QUIET_DAYS {
+        Behavior::Rest
+    } else if is_first_contribution_of_week(recent_activity) {
+        Behavior::SurfaceFeeding
+    } else if has_crossed_milestone(koi_development.total_contributions, recent_activity)
         || is_finished_busy_week(recent_activity)
     {
         Behavior::Dart
     } else {
         Behavior::Cruise
     }
+}
+
+fn is_first_contribution_of_week(recent_activity: &RecentActivity) -> bool {
+    matches!(
+        recent_activity.observation_week_contributions.split_last(),
+        Some((&observed_day, earlier_days))
+            if observed_day > 0 && earlier_days.iter().all(|&day_contributions| day_contributions == 0)
+    )
 }
 
 fn has_crossed_milestone(total_contributions: u64, recent_activity: &RecentActivity) -> bool {
