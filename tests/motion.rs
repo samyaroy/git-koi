@@ -423,7 +423,11 @@ fn the_mouth_breathes_while_lapping_and_gulps_while_resting() {
 fn assert_pose_values_flow(behavior: Behavior, step_limits: [f64; 17]) {
     let loop_frame_count = frame_count(behavior) as usize;
     let mut poses = collect_loop(behavior);
-    poses.push(calculate_swim_pose(behavior, Route::Laps, loop_frame_count as u32));
+    poses.push(calculate_swim_pose(
+        behavior,
+        Route::Laps,
+        loop_frame_count as u32,
+    ));
     assert_eq!(poses[loop_frame_count], poses[0]);
     for ((value_name, read_value, wraps_around), largest_step) in
         POSE_VALUES.into_iter().zip(step_limits)
