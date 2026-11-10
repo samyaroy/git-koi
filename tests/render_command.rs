@@ -18,15 +18,14 @@ const HISTORY_FIXTURE: &str = concat!(
 
 #[test]
 fn render_writes_the_days_loop_still_and_preview_as_the_renderer_draws_them() {
-    // Two quiet weeks make the koi rest, so the loop can't pass as the fallback cruise.
+    // Crossing 1,000 contributions on the last day makes the koi dart, so the loop
+    // can't pass as the everyday cruise.
     let mut account_snapshot = read_fixture_snapshot();
     let contribution_history = account_snapshot.contribution_history.as_mut().unwrap();
-    for day_offset in 1..=14 {
-        contribution_history.days.push(ContributionDay {
-            date: contribution_history.observed_on + Days::new(day_offset),
-            contribution_count: 0,
-        });
-    }
+    contribution_history.days.push(ContributionDay {
+        date: contribution_history.observed_on + Days::new(1),
+        contribution_count: 1_000,
+    });
     contribution_history.observed_on = contribution_history.days.last().unwrap().date;
     let scratch_directory = fresh_directory("render-default");
     let snapshot_path = scratch_directory.join("snapshot.json");
@@ -51,7 +50,7 @@ fn render_writes_the_days_loop_still_and_preview_as_the_renderer_draws_them() {
 
     let koi_development = derive_koi_development(&account_snapshot).unwrap();
     let behavior = select_behavior(&koi_development);
-    assert_eq!(behavior, Behavior::Rest);
+    assert_eq!(behavior, Behavior::Dart);
     let swim_frames: Vec<KoiFrame> = (0..frame_count(behavior))
         .map(|frame_index| {
             render_swim_frame(&koi_development, KoiBody::White, behavior, frame_index)

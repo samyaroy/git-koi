@@ -6,6 +6,12 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The koi always swims laps. Quiet stretches and the first contribution of a
+  week no longer bring deep rest, rest, or surface feeding: those days cruise,
+  and darting is unchanged.
+
 ## [1.0.2] - 2026-10-31
 
 ### Fixed
