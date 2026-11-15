@@ -452,7 +452,10 @@ impl fmt::Display for CollectionError {
                     "GitHub reported two contribution counts for {conflicting_date}; try again"
                 )
             }
-            Self::InvalidHistory(history_error) => {
+            Self::InvalidHistory(
+                history_error @ (ContributionHistoryError::MissingHistory
+                | ContributionHistoryError::AfterObservationDate { .. }),
+            ) => {
                 write!(
                     output_formatter,
                     "collected history is invalid: {history_error}"
