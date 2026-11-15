@@ -15,7 +15,12 @@ use git_koi::motion::frame_count;
 use git_koi::output::{encode_gif, encode_png, encode_preview_html};
 use git_koi::render::{KoiFrame, render_koi, render_swim_frame};
 
-const USAGE: &str = "Usage: git-koi collect LOGIN [--output FILE]
+/// The command's usage, listing the bodies from [`BODY_NAMES`] so the help names every
+/// body the parser accepts.
+fn build_usage_text() -> String {
+    let body_names = list_body_names();
+    format!(
+        "Usage: git-koi collect LOGIN [--output FILE]
        git-koi render SNAPSHOT --output-dir DIR [--body BODY]
        git-koi --help | --version
 Collect LOGIN's public GitHub snapshot as JSON through `gh api`: public owned and
@@ -25,11 +30,13 @@ Writes to standard output, or replaces FILE only after collection succeeds.
 Requires an authenticated GitHub CLI; in GitHub Actions, set GH_TOKEN to github.token.
 Render a collected SNAPSHOT into DIR: koi.gif swims the behavior chosen for its
 observation date, koi.png is the still koi, and preview.html shows both on light and
-dark backgrounds. BODY is white (the default), black, asagi, tea, gold, or platinum.
+dark backgrounds. BODY is {body_names}.
 The files are replaced only after all of them render.
-Errors go to stderr and exit 1; invalid usage exits 2.
+Render prints nothing on success; errors go to stderr and exit 1; invalid usage exits 2.
 Examples: git-koi collect octocat --output snapshot.json
-          git-koi render snapshot.json --output-dir koi --body asagi";
+          git-koi render snapshot.json --output-dir koi --body asagi"
+    )
+}
 
 /// Each body's name on the command line.
 const BODY_NAMES: [(&str, KoiBody); 6] = [
@@ -41,6 +48,24 @@ const BODY_NAMES: [(&str, KoiBody); 6] = [
     ("platinum", KoiBody::Platinum),
 ];
 
+/// The body names in table order, the default marked and the last joined with "or".
+fn list_body_names() -> String {
+    let listed_names: Vec<String> = BODY_NAMES
+        .iter()
+        .map(|(body_name, koi_body)| {
+            if *koi_body == KoiBody::default() {
+                format!("{body_name} (the default)")
+            } else {
+                (*body_name).to_owned()
+            }
+        })
+        .collect();
+    let (last_name, leading_names) = listed_names
+        .split_last()
+        .expect("the table names at least one body");
+    format!("{}, or {last_name}", leading_names.join(", "))
+}
+
 fn main() -> ExitCode {
     let program_arguments: Vec<OsString> = env::args_os().skip(1).collect();
     let argument_texts: Vec<Option<&str>> = program_arguments
@@ -49,7 +74,7 @@ fn main() -> ExitCode {
         .collect();
     match argument_texts.as_slice() {
         [Some("--help")] | [Some("collect" | "render"), Some("--help")] => {
-            println!("{USAGE}");
+            println!("{}", build_usage_text());
             ExitCode::SUCCESS
         }
         [Some("--version")] => {
@@ -82,7 +107,7 @@ fn main() -> ExitCode {
             parse_body(body_name).expect("the guard parsed the body"),
         ),
         _ => {
-            eprintln!("{USAGE}");
+            eprintln!("{}", build_usage_text());
             ExitCode::from(2)
         }
     }
@@ -106,20 +131,12 @@ fn run_collect(login: &str, output_path: Option<&Path>) -> ExitCode {
 }
 
 fn run_render(snapshot_path: &Path, output_directory: &Path, koi_body: KoiBody) -> ExitCode {
-    let render_result = render_day(snapshot_path, koi_body).and_then(|rendered_day| {
+    let render_result = render_day(snapshot_path, koi_body).and_then(|output_files| {
         fs::create_dir_all(output_directory)
             .map_err(|create_error| format!("{}: {create_error}", output_directory.display()))?;
-        let mut written_paths = Vec::new();
-        for (file_name, file_bytes) in rendered_day.output_files {
-            let output_path = output_directory.join(file_name);
-            replace_file(&output_path, &file_bytes)?;
-            written_paths.push(output_path.display().to_string());
+        for (file_name, file_bytes) in output_files {
+            replace_file(&output_directory.join(file_name), &file_bytes)?;
         }
-        println!(
-            "{}: wrote {}",
-            rendered_day.caption,
-            written_paths.join(", ")
-        );
         Ok(())
     });
     match render_result {
@@ -131,14 +148,12 @@ fn run_render(snapshot_path: &Path, output_directory: &Path, koi_body: KoiBody) 
     }
 }
 
-/// The day's files, by name, with a caption naming the behavior, observation date, and body.
-struct RenderedDay {
-    caption: String,
-    output_files: [(&'static str, Vec<u8>); 3],
-}
-
-/// Render and encode the day's files in memory, so none is written unless all succeed.
-fn render_day(snapshot_path: &Path, koi_body: KoiBody) -> Result<RenderedDay, String> {
+/// Render and encode the day's files in memory, by name, so none is written unless all
+/// succeed. The preview's caption names the behavior, observation date, and body.
+fn render_day(
+    snapshot_path: &Path,
+    koi_body: KoiBody,
+) -> Result<[(&'static str, Vec<u8>); 3], String> {
     let snapshot_json = fs::read_to_string(snapshot_path)
         .map_err(|read_error| format!("{}: {read_error}", snapshot_path.display()))?;
     let account_snapshot: AccountSnapshot = serde_json::from_str(&snapshot_json)
@@ -160,14 +175,11 @@ fn render_day(snapshot_path: &Path, koi_body: KoiBody) -> Result<RenderedDay, St
         name_body(koi_body)
     );
     let preview_html = encode_preview_html(&caption);
-    Ok(RenderedDay {
-        caption,
-        output_files: [
-            ("koi.gif", gif_bytes),
-            ("koi.png", png_bytes),
-            ("preview.html", preview_html.into_bytes()),
-        ],
-    })
+    Ok([
+        ("koi.gif", gif_bytes),
+        ("koi.png", png_bytes),
+        ("preview.html", preview_html.into_bytes()),
+    ])
 }
 
 fn parse_body(body_name: &str) -> Option<KoiBody> {
@@ -231,4 +243,30 @@ fn replace_file(output_path: &Path, file_bytes: &[u8]) -> Result<(), String> {
             let _ = fs::remove_file(&temporary_path);
             format!("{}: {write_error}", output_path.display())
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_usage_lists_every_body_the_parser_accepts_and_marks_the_default() {
+        let usage_text = build_usage_text();
+        let body_sentence = usage_text
+            .split_once("BODY is ")
+            .and_then(|(_, sentence_onward)| sentence_onward.split_once('.'))
+            .map(|(body_sentence, _)| body_sentence)
+            .expect("the usage has a sentence listing the bodies");
+        for (body_name, _) in BODY_NAMES {
+            assert!(
+                body_sentence.contains(body_name),
+                "the usage leaves out {body_name}: {body_sentence}"
+            );
+        }
+        let default_name = name_body(KoiBody::default());
+        assert!(
+            body_sentence.contains(&format!("{default_name} (the default)")),
+            "{body_sentence}"
+        );
+    }
 }

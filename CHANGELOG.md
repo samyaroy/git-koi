@@ -6,6 +6,11 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- `git-koi render` prints nothing when it succeeds. The line it printed named
+  the behavior, date, and body, which `preview.html` already shows (#43).
+
 ### Fixed
 
 - When GitHub's contribution calendar leaves out a day or reports one twice,
