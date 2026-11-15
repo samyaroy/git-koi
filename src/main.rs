@@ -17,7 +17,7 @@ use git_koi::render::{KoiFrame, render_koi, render_swim_frame};
 
 /// The command's usage, listing the bodies from [`BODY_NAMES`] so the help names every
 /// body the parser accepts.
-fn usage() -> String {
+fn build_usage_text() -> String {
     let body_names = list_body_names();
     format!(
         "Usage: git-koi collect LOGIN [--output FILE]
@@ -74,7 +74,7 @@ fn main() -> ExitCode {
         .collect();
     match argument_texts.as_slice() {
         [Some("--help")] | [Some("collect" | "render"), Some("--help")] => {
-            println!("{}", usage());
+            println!("{}", build_usage_text());
             ExitCode::SUCCESS
         }
         [Some("--version")] => {
@@ -107,7 +107,7 @@ fn main() -> ExitCode {
             parse_body(body_name).expect("the guard parsed the body"),
         ),
         _ => {
-            eprintln!("{}", usage());
+            eprintln!("{}", build_usage_text());
             ExitCode::from(2)
         }
     }
@@ -264,7 +264,7 @@ mod tests {
 
     #[test]
     fn the_usage_lists_every_body_the_parser_accepts_and_marks_the_default() {
-        let usage_text = usage();
+        let usage_text = build_usage_text();
         let body_sentence = usage_text
             .split_once("BODY is ")
             .and_then(|(_, sentence_onward)| sentence_onward.split_once('.'))
