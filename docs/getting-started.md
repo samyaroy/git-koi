@@ -44,8 +44,8 @@ commit step's path and the README image to match.
 Keep `token` at its default. The Action's process holds whatever token the
 workflow passes it, so the token bounds what a compromised release could do. The
 built-in token reaches only the profile repository, for one job, with the
-workflow's `contents: write`; a personal access token would hand over everything
-it can reach.
+workflow's permissions; a personal access token would hand over everything it
+can reach.
 
 The example uses `yalongwastaken/git-koi@v1`. Each way of referencing the Action
 fixes something different:
