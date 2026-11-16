@@ -6,6 +6,22 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- The Action runs on Windows runners, downloading and checking the release's
+  `.zip` (#36).
+
+### Changed
+
+- `git-koi render` prints nothing when it succeeds. The line it printed named
+  the behavior, date, and body, which `preview.html` already shows (#43).
+
+### Fixed
+
+- When GitHub's contribution calendar leaves out a day or reports one twice,
+  `git-koi collect` says so and asks to try again, instead of naming a repair
+  only the author of a snapshot file can make (#56).
+
 ## [1.0.2] - 2026-10-31
 
 ### Fixed
