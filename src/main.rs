@@ -18,8 +18,8 @@ use git_koi::render::{KoiFrame, render_koi, render_swim_frame};
 const USAGE: &str = "Usage: git-koi collect LOGIN [--output FILE]
        git-koi render SNAPSHOT --output-dir DIR [--body BODY]
        git-koi --help | --version
-Collect LOGIN's public GitHub snapshot as JSON through `gh api`: public owned and
-contributed repositories, and daily contributions from the account's creation
+Collect LOGIN's GitHub snapshot as JSON through `gh api`: the owned and contributed
+repositories the token can see (private ones need a token with private-repo read), and daily contributions from the account's creation
 through yesterday (UTC), the last complete day.
 Writes to standard output, or replaces FILE only after collection succeeds.
 Requires an authenticated GitHub CLI; in GitHub Actions, set GH_TOKEN to github.token.

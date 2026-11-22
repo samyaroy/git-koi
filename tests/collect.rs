@@ -7,7 +7,8 @@ use chrono::{Datelike, Days, NaiveDate, Weekday};
 use git_koi::coat::KoiBody;
 use git_koi::collect::{CollectionError, GraphqlClient, collect_account_snapshot};
 use git_koi::history::{
-    ContributionHistoryError, LanguageColor, calculate_language_shares, summarize_contributions,
+    COUNT_FORKS, ContributionHistoryError, LanguageColor, calculate_language_shares,
+    summarize_contributions,
 };
 use git_koi::koi::derive_koi_development;
 use git_koi::render::render_koi;
@@ -22,9 +23,18 @@ fn collected_snapshot_covers_every_page_and_day_and_renders() {
 
     assert_eq!(account_snapshot.account_id, 4242);
     assert_eq!(account_snapshot.repositories.len(), 4);
+    // Repository 3 is a Rust fork, which votes only while COUNT_FORKS is on.
+    let expected_shares = if COUNT_FORKS {
+        BTreeMap::from([
+            ("Python".to_owned(), 1.0 / 3.0),
+            ("Rust".to_owned(), 2.0 / 3.0),
+        ])
+    } else {
+        BTreeMap::from([("Python".to_owned(), 0.5), ("Rust".to_owned(), 0.5)])
+    };
     assert_eq!(
         calculate_language_shares(&account_snapshot).unwrap(),
-        BTreeMap::from([("Python".to_owned(), 0.5), ("Rust".to_owned(), 0.5)])
+        expected_shares
     );
     assert_eq!(
         account_snapshot.language_colors,

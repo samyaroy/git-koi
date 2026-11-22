@@ -1,5 +1,6 @@
 //! Account snapshots collected from GitHub through the GitHub CLI, separate from
-//! interpretation. Only public data is read, so a workflow's built-in token is enough.
+//! interpretation. Reads whatever the token can see: the built-in workflow token sees
+//! public data only; a personal access token with private-repo read also sees private repos.
 
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -65,8 +66,8 @@ const CALENDAR_QUERY: &str = "query($login: String!, $from: DateTime!, $to: Date
     user(login: $login) { contributionsCollection(from: $from, to: $to) { \
     contributionCalendar { weeks { contributionDays { date contributionCount } } } } } }";
 
-/// Collect one account's public snapshot: its public owned repositories, the public
-/// repositories GitHub counts it as contributing to, GitHub's color for each of their
+/// Collect one account's snapshot: the owned repositories, and the repositories GitHub
+/// counts it as contributing to, that the token can see, GitHub's color for each of their
 /// languages, and daily contribution counts from the day it was created through the
 /// latest date GitHub reports.
 ///
@@ -103,14 +104,14 @@ pub fn collect_account_snapshot(
         login,
         &mut language_colors,
         "repositories",
-        "repositories(first: 100, after: $cursor, ownerAffiliations: [OWNER], privacy: PUBLIC)",
+        "repositories(first: 100, after: $cursor, ownerAffiliations: [OWNER])",
     )?;
     repositories.extend(collect_repositories(
         github,
         login,
         &mut language_colors,
         "repositoriesContributedTo",
-        "repositoriesContributedTo(first: 100, after: $cursor, privacy: PUBLIC, \
+        "repositoriesContributedTo(first: 100, after: $cursor, \
          includeUserRepositories: false, \
          contributionTypes: [COMMIT, ISSUE, PULL_REQUEST, PULL_REQUEST_REVIEW, REPOSITORY])",
     )?);

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use chrono::{Datelike, Days, NaiveDate};
 use git_koi::history::{
-    AccountSnapshot, ConflictingRepository, ContributionDay, ContributionHistory,
+    AccountSnapshot, COUNT_FORKS, ConflictingRepository, ContributionDay, ContributionHistory,
     ContributionHistoryError, LanguageColor, RepositoryVisibility, calculate_language_shares,
     summarize_contributions,
 };
@@ -16,14 +16,22 @@ fn language_shares_count_only_eligible_projects() {
 
     let language_shares = calculate_language_shares(&account_snapshot).unwrap();
 
-    assert_eq!(
-        language_shares,
+    // Three public, one private, and one internal Rust repository, one Python, one C++,
+    // and a public Rust fork that votes only while COUNT_FORKS is on.
+    let expected_shares = if COUNT_FORKS {
         BTreeMap::from([
-            ("C++".to_owned(), 0.2),
-            ("Python".to_owned(), 0.2),
-            ("Rust".to_owned(), 0.6),
+            ("C++".to_owned(), 0.125),
+            ("Python".to_owned(), 0.125),
+            ("Rust".to_owned(), 0.75),
         ])
-    );
+    } else {
+        BTreeMap::from([
+            ("C++".to_owned(), 1.0 / 7.0),
+            ("Python".to_owned(), 1.0 / 7.0),
+            ("Rust".to_owned(), 5.0 / 7.0),
+        ])
+    };
+    assert_eq!(language_shares, expected_shares);
 }
 
 #[test]
