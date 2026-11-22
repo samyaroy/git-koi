@@ -9,8 +9,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 /// GitHub observations supplied by the caller, readable and writable through Serde.
 ///
-/// The caller supplies the owned and GitHub-recognized contributed repositories; only
-/// public, non-fork ones affect language shares, so a public-only collection is enough.
+/// The caller supplies the owned and GitHub-recognized contributed repositories; every
+/// non-fork one affects language shares, whatever its visibility.
 /// Parsing verifies the format, not collection completeness.
 /// Older snapshots remain usable for language shares but have no contribution history
 /// or language colors. Language colors require contribution history (version 3).
@@ -126,7 +126,7 @@ pub struct ContributionWeek {
 pub struct RepositoryObservation {
     /// GitHub's stable numeric ID for the repository.
     pub repository_id: u64,
-    /// Who can see the repository; only public ones count toward language shares.
+    /// Who can see the repository; recorded, but it does not affect language shares.
     pub visibility: RepositoryVisibility,
     /// Whether the repository is a fork, which keeps it out of language shares.
     pub is_fork: bool,
@@ -150,7 +150,7 @@ pub enum RepositoryVisibility {
 
 /// Calculate fractions of eligible projects, keyed by unchanged language names.
 ///
-/// Each distinct public, non-fork repository with a known primary language has
+/// Each distinct non-fork repository, of any visibility, with a known primary language has
 /// one vote. Identical observations count once; conflicting observations for the
 /// same ID fail rather than let input order determine the answer. No additional
 /// contribution or age rules apply. The input is borrowed without mutation.
@@ -175,9 +175,7 @@ pub fn calculate_language_shares(
 
     let mut language_repository_counts = BTreeMap::new();
     for repository_observation in distinct_repositories.values() {
-        if repository_observation.visibility != RepositoryVisibility::Public
-            || repository_observation.is_fork
-        {
+        if repository_observation.is_fork {
             continue;
         }
         if let Some(language_name) = &repository_observation.primary_language {
