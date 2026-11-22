@@ -19,9 +19,9 @@ fn language_shares_count_only_eligible_projects() {
     assert_eq!(
         language_shares,
         BTreeMap::from([
-            ("C++".to_owned(), 1.0 / 7.0),
-            ("Python".to_owned(), 1.0 / 7.0),
-            ("Rust".to_owned(), 5.0 / 7.0),
+            ("C++".to_owned(), 0.125),
+            ("Python".to_owned(), 0.125),
+            ("Rust".to_owned(), 0.75),
         ])
     );
 }

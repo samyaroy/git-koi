@@ -22,9 +22,13 @@ fn collected_snapshot_covers_every_page_and_day_and_renders() {
 
     assert_eq!(account_snapshot.account_id, 4242);
     assert_eq!(account_snapshot.repositories.len(), 4);
+    // Repository 3 is a Rust fork; forks vote too.
     assert_eq!(
         calculate_language_shares(&account_snapshot).unwrap(),
-        BTreeMap::from([("Python".to_owned(), 0.5), ("Rust".to_owned(), 0.5)])
+        BTreeMap::from([
+            ("Python".to_owned(), 1.0 / 3.0),
+            ("Rust".to_owned(), 2.0 / 3.0),
+        ])
     );
     assert_eq!(
         account_snapshot.language_colors,

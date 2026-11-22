@@ -10,7 +10,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 /// GitHub observations supplied by the caller, readable and writable through Serde.
 ///
 /// The caller supplies the owned and GitHub-recognized contributed repositories; every
-/// non-fork one affects language shares, whatever its visibility.
+/// one affects language shares, whatever its visibility and whether or not it is a fork.
 /// Parsing verifies the format, not collection completeness.
 /// Older snapshots remain usable for language shares but have no contribution history
 /// or language colors. Language colors require contribution history (version 3).
@@ -128,7 +128,7 @@ pub struct RepositoryObservation {
     pub repository_id: u64,
     /// Who can see the repository; recorded, but it does not affect language shares.
     pub visibility: RepositoryVisibility,
-    /// Whether the repository is a fork, which keeps it out of language shares.
+    /// Whether the repository is a fork; recorded, but it does not affect language shares.
     pub is_fork: bool,
     /// GitHub's language name unchanged; null means a known absence.
     /// Omitting the field is an error because absence of data is not an observation.
@@ -150,7 +150,7 @@ pub enum RepositoryVisibility {
 
 /// Calculate fractions of eligible projects, keyed by unchanged language names.
 ///
-/// Each distinct non-fork repository, of any visibility, with a known primary language has
+/// Each distinct repository, fork or not and of any visibility, with a known primary language has
 /// one vote. Identical observations count once; conflicting observations for the
 /// same ID fail rather than let input order determine the answer. No additional
 /// contribution or age rules apply. The input is borrowed without mutation.
@@ -175,9 +175,6 @@ pub fn calculate_language_shares(
 
     let mut language_repository_counts = BTreeMap::new();
     for repository_observation in distinct_repositories.values() {
-        if repository_observation.is_fork {
-            continue;
-        }
         if let Some(language_name) = &repository_observation.primary_language {
             *language_repository_counts
                 .entry(language_name.clone())
