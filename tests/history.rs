@@ -77,9 +77,12 @@ fn missing_language_cannot_be_read_as_a_known_absence() {
     snapshot_document["repositories"][0]["primary_language"] = serde_json::Value::Null;
     let null_language_snapshot: AccountSnapshot =
         serde_json::from_value(snapshot_document.clone()).unwrap();
+    // Rust keeps two public, one private, and one internal repository against one Python
+    // and one C++, and gains the public Rust fork while COUNT_FORKS is on.
+    let expected_rust_share = if COUNT_FORKS { 5.0 / 7.0 } else { 4.0 / 6.0 };
     assert_eq!(
         calculate_language_shares(&null_language_snapshot).unwrap()["Rust"],
-        0.5
+        expected_rust_share
     );
 
     snapshot_document["repositories"][0]
