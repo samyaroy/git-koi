@@ -102,10 +102,41 @@ fn languages_on_one_pigment_share_its_patches() {
     assert_ne!(
         render_mix(&[
             ("Python", Some("#3572a5"), 0.5),
-            ("Rust", Some("#dea584"), 0.5),
+            ("Java", Some("#b07219"), 0.5),
         ]),
         render_mix(&[("Python", Some("#3572a5"), 1.0)])
     );
+}
+
+#[test]
+fn pinned_languages_take_their_pigment_over_their_hue() {
+    let render_mix = |language_mix| {
+        render_koi(
+            &develop_with_languages(ADULT_CONTRIBUTIONS, language_mix),
+            KoiBody::default(),
+        )
+    };
+    // Rust's tan would be orange and HTML's red would be red; both are pinned.
+    assert_eq!(
+        render_mix(&[("Rust", Some("#dea584"), 1.0)]),
+        render_mix(&[("Kotlin", Some("#a97bff"), 1.0)])
+    );
+    assert_eq!(
+        render_mix(&[("HTML", Some("#e34c26"), 1.0)]),
+        render_mix(&[("Jupyter Notebook", Some("#da5b0b"), 1.0)])
+    );
+    // Vue is pinned to green, which no other pigment draws.
+    for other_mix in [
+        RED_MIX,
+        &[("Python", Some("#3572a5"), 1.0)],
+        &[("JavaScript", Some("#f1e05a"), 1.0)],
+        &[("Kotlin", Some("#a97bff"), 1.0)],
+    ] {
+        assert_ne!(
+            render_mix(&[("Vue", Some("#41b883"), 1.0)]),
+            render_mix(other_mix)
+        );
+    }
 }
 
 #[test]
@@ -121,7 +152,7 @@ fn equal_pigment_shares_tie_despite_rounding() {
     assert_eq!(
         render_mix(&[
             ("Python", Some("#3572a5"), 0.4),
-            ("Rust", Some("#dea584"), 0.1),
+            ("Assembly", Some("#6e4c13"), 0.1),
             ("Java", Some("#b07219"), 0.2),
             ("JavaScript", Some("#f1e05a"), 0.3),
         ]),
@@ -182,8 +213,10 @@ fn every_body_keeps_each_pigment_visible() {
             RED_MIX,
             &[("C", Some("#555555"), 1.0)],
             &[("JavaScript", Some("#f1e05a"), 1.0)],
-            &[("Rust", Some("#dea584"), 1.0)],
+            &[("Java", Some("#b07219"), 1.0)],
             &[("Python", Some("#3572a5"), 1.0)],
+            &[("Vue", Some("#41b883"), 1.0)],
+            &[("Kotlin", Some("#a97bff"), 1.0)],
         ] {
             let pigment_frame = render_koi(
                 &develop_with_languages(FULL_COLOR_CONTRIBUTIONS, single_pigment_mix),
@@ -216,7 +249,7 @@ fn bodies_change_colors_but_not_shape() {
         ("C++", Some("#f34b7d"), 0.2),
         ("C", Some("#555555"), 0.2),
         ("JavaScript", Some("#f1e05a"), 0.2),
-        ("Rust", Some("#dea584"), 0.2),
+        ("Java", Some("#b07219"), 0.2),
         ("Python", Some("#3572a5"), 0.2),
     ];
     let koi_development = develop_with_languages(1_500, five_pigment_mix);

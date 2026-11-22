@@ -164,6 +164,28 @@ const STEEL_RAMP: [[u8; 4]; 4] = [
     [90, 105, 136, 255],
     [192, 203, 220, 255],
 ];
+const GREEN_RAMP: [[u8; 4]; 3] = [[25, 60, 62, 255], [38, 92, 66, 255], [62, 137, 72, 255]];
+const BRIGHT_GREEN_RAMP: [[u8; 4]; 3] = [[38, 92, 66, 255], [62, 137, 72, 255], [99, 199, 77, 255]];
+const PURPLE_RAMP: [[u8; 4]; 3] = [[62, 39, 49, 255], [104, 56, 108, 255], [181, 80, 136, 255]];
+const BRIGHT_PURPLE_RAMP: [[u8; 4]; 3] = [
+    [104, 56, 108, 255],
+    [181, 80, 136, 255],
+    [246, 117, 122, 255],
+];
+
+/// Languages pinned to a pigment by name, ahead of the hue rule. Every other language
+/// still takes the pigment nearest its GitHub color.
+const LANGUAGE_PIGMENTS: [(&str, Pigment); 9] = [
+    ("HTML", Pigment::Orenji),
+    ("JavaScript", Pigment::Ki),
+    ("Jupyter Notebook", Pigment::Orenji),
+    ("Python", Pigment::Ai),
+    ("R", Pigment::Ai),
+    ("Ruby", Pigment::Beni),
+    ("Rust", Pigment::Murasaki),
+    ("TypeScript", Pigment::Ai),
+    ("Vue", Pigment::Midori),
+];
 
 /// Patch scores must beat the white ground's score to place a pigment.
 const WHITE_PATCH_SCORE: f64 = 0.5;
@@ -289,11 +311,16 @@ impl KoiBody {
             (_, Pigment::Ki) => &YELLOW_RAMP,
             (_, Pigment::Orenji) => &ORANGE_RAMP,
             (_, Pigment::Ai) => &BLUE_RAMP,
+            (Self::Black, Pigment::Midori) => &BRIGHT_GREEN_RAMP,
+            (Self::Black, Pigment::Murasaki) => &BRIGHT_PURPLE_RAMP,
+            (_, Pigment::Midori) => &GREEN_RAMP,
+            (_, Pigment::Murasaki) => &PURPLE_RAMP,
         }
     }
 }
 
-/// Koi pigments; each language color becomes the one nearest in hue.
+/// Koi pigments; each language takes its pinned pigment, or the one nearest its color
+/// in hue.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum Pigment {
     /// Red.
@@ -306,6 +333,10 @@ enum Pigment {
     Orenji,
     /// Blue.
     Ai,
+    /// Dark green.
+    Midori,
+    /// Purple.
+    Murasaki,
 }
 
 /// A koi's language pigments laid out on one body shape.
@@ -314,7 +345,7 @@ enum Pigment {
 /// body area in proportion to its share, pulled toward the top pigment's classic
 /// variety layout. The second pigment adds spots, or Asagi sides under blue; the third
 /// tints the fin roots. Young koi show pigments pale until FULL_COLOR_CONTRIBUTIONS:
-/// red, orange, yellow, and blue come in first, and black last. Streak marks color
+/// red, orange, yellow, blue, green, and purple come in first, and black last. Streak marks color
 /// the fins and change only the language colors.
 pub(crate) struct KoiCoat {
     identity_seed: u64,
@@ -415,7 +446,9 @@ impl KoiCoat {
         let shade_ramp: &'static [[u8; 4]] = match pigment {
             // Only the standard blue carries its dark net.
             Pigment::Ai if pigment_ramp == BLUE_RAMP && is_on_net() => &BLUE_NET_RAMP,
-            Pigment::Ki | Pigment::Orenji if base_pigment == Some(pigment) && is_on_net() => {
+            Pigment::Ki | Pigment::Orenji | Pigment::Midori | Pigment::Murasaki
+                if base_pigment == Some(pigment) && is_on_net() =>
+            {
                 &pigment_ramp[..1]
             }
             _ => pigment_ramp,
@@ -562,7 +595,7 @@ impl KoiCoat {
 
     /// The top pigment's classic layout with the second pigment's spots: red plates
     /// (Kohaku), black lightning and patches (Shiro Utsuri), a blue back with red,
-    /// orange, or yellow sides (Asagi), or a solid yellow or orange coat.
+    /// orange, or yellow sides (Asagi), or a solid yellow, orange, green, or purple coat.
     fn select_variety_pigment(
         &self,
         along_fraction: f64,
@@ -603,7 +636,9 @@ impl KoiCoat {
             Pigment::Ai if lateral_fraction.abs() > 0.64 => {
                 secondary_pigment.filter(|_| has_asagi_sides)
             }
-            Pigment::Ai | Pigment::Ki | Pigment::Orenji => Some(base_pigment),
+            Pigment::Ai | Pigment::Ki | Pigment::Orenji | Pigment::Midori | Pigment::Murasaki => {
+                Some(base_pigment)
+            }
         }
     }
 
@@ -624,8 +659,9 @@ impl KoiCoat {
         match pigment {
             Pigment::Beni | Pigment::Orenji => &PALE_RED_RAMP,
             Pigment::Sumi => &PALE_BLACK_RAMP,
-            Pigment::Ki => &PALE_YELLOW_RAMP,
+            Pigment::Ki | Pigment::Midori => &PALE_YELLOW_RAMP,
             Pigment::Ai => &PALE_BLUE_RAMP,
+            Pigment::Murasaki => &PALE_RED_RAMP,
         }
     }
 }
@@ -641,7 +677,7 @@ fn calculate_pigment_shares(koi_development: &KoiDevelopment) -> Vec<(Pigment, f
             .copied()
             .flatten();
         *summed_shares
-            .entry(select_pigment(language_color))
+            .entry(select_language_pigment(language_name, language_color))
             .or_insert(0.0) += language_share / total_share;
     }
     // Sums of equal shares can differ in their last bits, so order by rounded shares.
@@ -653,6 +689,14 @@ fn calculate_pigment_shares(koi_development: &KoiDevelopment) -> Vec<(Pigment, f
             .then(left.0.cmp(&right.0))
     });
     pigment_shares
+}
+
+/// A pinned language's pigment, or else the one nearest its color in hue.
+fn select_language_pigment(language_name: &str, language_color: Option<LanguageColor>) -> Pigment {
+    LANGUAGE_PIGMENTS
+        .iter()
+        .find(|(pinned_name, _)| *pinned_name == language_name)
+        .map_or_else(|| select_pigment(language_color), |&(_, pigment)| pigment)
 }
 
 /// Map a GitHub language color to the koi pigment nearest in hue. Grays and missing
@@ -681,8 +725,10 @@ fn select_pigment(language_color: Option<LanguageColor>) -> Pigment {
     match hue_degrees {
         hue_degrees if !(18.0..330.0).contains(&hue_degrees) => Pigment::Beni,
         hue_degrees if hue_degrees < 45.0 => Pigment::Orenji,
-        hue_degrees if hue_degrees < 160.0 => Pigment::Ki,
-        _ => Pigment::Ai,
+        hue_degrees if hue_degrees < 75.0 => Pigment::Ki,
+        hue_degrees if hue_degrees < 170.0 => Pigment::Midori,
+        hue_degrees if hue_degrees < 255.0 => Pigment::Ai,
+        _ => Pigment::Murasaki,
     }
 }
 
