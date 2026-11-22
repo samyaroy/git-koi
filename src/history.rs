@@ -10,7 +10,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 /// GitHub observations supplied by the caller, readable and writable through Serde.
 ///
 /// The caller supplies the owned and GitHub-recognized contributed repositories; every
-/// one affects language shares, whatever its visibility and whether or not it is a fork.
+/// one affects language shares, whatever its visibility, except forks while COUNT_FORKS
+/// is off.
 /// Parsing verifies the format, not collection completeness.
 /// Older snapshots remain usable for language shares but have no contribution history
 /// or language colors. Language colors require contribution history (version 3).
@@ -128,7 +129,8 @@ pub struct RepositoryObservation {
     pub repository_id: u64,
     /// Who can see the repository; recorded, but it does not affect language shares.
     pub visibility: RepositoryVisibility,
-    /// Whether the repository is a fork; recorded, but it does not affect language shares.
+    /// Whether the repository is a fork; forks count toward language shares only while
+    /// COUNT_FORKS is on.
     pub is_fork: bool,
     /// GitHub's language name unchanged; null means a known absence.
     /// Omitting the field is an error because absence of data is not an observation.
@@ -148,12 +150,18 @@ pub enum RepositoryVisibility {
     Internal,
 }
 
+/// Whether forks vote in language shares. Off by default: a fork is mostly someone
+/// else's code, and a fork and its original would both count. Set it to true to count
+/// forks like any other repository.
+pub const COUNT_FORKS: bool = false;
+
 /// Calculate fractions of eligible projects, keyed by unchanged language names.
 ///
-/// Each distinct repository, fork or not and of any visibility, with a known primary language has
-/// one vote. Identical observations count once; conflicting observations for the
-/// same ID fail rather than let input order determine the answer. No additional
-/// contribution or age rules apply. The input is borrowed without mutation.
+/// Each distinct repository of any visibility with a known primary language has
+/// one vote; a fork votes only while COUNT_FORKS is on. Identical observations count
+/// once; conflicting observations for the same ID fail rather than let input order
+/// determine the answer. No additional contribution or age rules apply. The input is
+/// borrowed without mutation.
 ///
 /// Shares are ordered by language name and range from zero to one. An empty
 /// eligible collection returns an empty map. Collection and file access belong
@@ -175,6 +183,9 @@ pub fn calculate_language_shares(
 
     let mut language_repository_counts = BTreeMap::new();
     for repository_observation in distinct_repositories.values() {
+        if repository_observation.is_fork && !COUNT_FORKS {
+            continue;
+        }
         if let Some(language_name) = &repository_observation.primary_language {
             *language_repository_counts
                 .entry(language_name.clone())
